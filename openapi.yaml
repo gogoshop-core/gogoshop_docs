@@ -1,0 +1,3230 @@
+openapi: "3.1.0"
+
+info:
+  title: GOGOSHOP API
+  version: "1.0.0"
+  description: |
+    ## 概述
+    GOGOSHOP 是一個 SaaS 多租戶電商平台。本文件涵蓋以下公開 API 端點：
+
+    - **`/api/v1/auth/*`** — 身份驗證，取得 JWT Access Token
+    - **`/api/v1/orders/*`** — 訂單管理 CRUD 與進階操作
+    - **`/api/v1/products/*`** — 商品管理 CRUD
+    - **`/api/v1/members/*`** — 會員管理、購物金、積分、願望清單
+    - **`/api/v1/stats/*`** — 報表統計（營業額、活動代碼、會員排名、商品排名）
+    - **`/mcp`** — Model Context Protocol (MCP) 端點，供 AI Agent 使用
+
+    ### 1. 基礎資訊 (Base URL)
+
+    所有 API 請求都應發送到以下基礎 URL：
+
+    - **正式環境**: `https://api.gogoshop.io`
+
+    ### 2. 認證機制 (Authentication)
+
+    本 API 採用 **Bearer Token (JWT)** 進行身份驗證。
+
+    - **Header 名稱**: `Authorization`
+    - **格式**: `Bearer {{accessToken}}`
+
+    **認證流程**：
+
+    1. 呼叫 `POST /api/v1/auth/access_token`，使用 `app_id` + `app_key` 換取 JWT Token。
+    2. 後續所有 `/api/v1/*` 請求，在 `X-Authorization` header 帶入 `Bearer <token>`。
+    3. Token 有效期為 **15 分鐘（900 秒）**，請自行實作 Token 自動刷新機制。
+
+    **示例**：
+
+    ```bash
+    curl -X GET https://api.gogoshop.io/api/v1/orders \
+      -H "X-Authorization: Bearer sYpX...456"
+    ```
+
+    > **MCP 端點例外**：`/mcp` 不使用 Bearer Token，改以自訂 Header
+    > `x-gogoshop-app-id` / `x-gogoshop-app-key` 進行租戶認證，
+    > 由 MCP Server 內部自動換取並快取 Access Token。
+
+    ### 3. 速率限制 (Rate Limiting)
+
+    為了保證服務穩定性，我們對 API 請求進行了頻率限制：
+
+    - **限制規則**: 依租戶方案而定，詳情請洽技術支援。
+    - **超過限制**: 若超過頻率，伺服器將回傳 `429 Too Many Requests` 錯誤。
+
+    ### 4. 數據格式 (Data Format)
+
+    - **請求格式**: `application/json`（除特定文件上傳接口外）
+    - **回應格式**: `application/json`
+    - **日期格式**: 使用 ISO 8601 格式，例如 `YYYY-MM-DD HH:mm:ss`（UTC+8）
+
+    ### 5. 通用狀態碼 (Common Status Codes)
+
+    | 狀態碼 | 說明 | 處理建議 |
+    |--------|------|----------|
+    | `200` | OK | 請求成功 |
+    | `400` | Bad Request | 請求參數錯誤，請檢查 Body 或 Params |
+    | `401` | Unauthorized | 身份驗證失敗或 Token 已過期 |
+    | `409` | Conflict | 程式符合規範但業務邏輯不允許 |
+    | `429` | Too Many Requests | 觸發速率限制，請稍候再試 |
+    | `500` | Internal Server Error | 伺服器內部錯誤，請聯繫技術支援 |
+
+    ### 6. 錯誤回應範例 (Error Response)
+
+    當請求失敗時，系統將回傳統一的錯誤格式：
+
+    ```json
+    {
+        "success": false,
+        "error": {
+            "code": "VALIDATION_FAILED",
+            "message": "手機號碼格式不正確",
+            "details": []
+        }
+    }
+    ```
+
+    ### 7. 聯絡技術支援
+
+    如果您在開發過程中遇到任何問題，請透過以下管道聯繫：
+
+    - **Email**: service@gogoshop.io
+
+  contact:
+    name: GOGOSHOP 技術支援
+    url: https://www.gogoshop.io
+    email: service@gogoshop.io
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://api.gogoshop.io
+    description: Production
+
+tags:
+  - name: Auth
+    description: 身份驗證 — 取得與更新 JWT Access Token
+  - name: Orders
+    description: 訂單管理 — CRUD、取消、開立發票、建立出貨單
+  - name: Products
+    description: 商品管理 — CRUD
+  - name: Members
+    description: 會員管理 — CRUD、購物金、積分、地址、願望清單
+  - name: Stats
+    description: 報表 — 營業額、活動代碼、會員排名、商品排名統計
+  - name: MCP
+    description: Model Context Protocol — AI Agent 整合端點
+
+# ─── Security Schemes ────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT Token，透過 `POST /api/v1/auth/access_token` 取得。
+        有效期 15 分鐘，請自行實作刷新邏輯。
+    AppIdHeader:
+      type: apiKey
+      in: header
+      name: x-gogoshop-app-id
+      description: 租戶 App ID（僅用於 `/mcp` 端點）
+    AppKeyHeader:
+      type: apiKey
+      in: header
+      name: x-gogoshop-app-key
+      description: 租戶 App Key（僅用於 `/mcp` 端點）
+
+  # ─── Reusable Schemas ─────────────────────────────────────────────────────────
+  schemas:
+
+    # ── Generic ────────────────────────────────────────────────────────────────
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+      required:
+        - success
+
+    ErrorResponse:
+      type: object
+      required:
+        - success
+        - error
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              description: 錯誤代碼（SCREAMING_SNAKE_CASE）
+              enum:
+                - VALIDATION_FAILED
+                - RESOURCE_NOT_FOUND
+                - PERMISSION_DENIED
+                - UNAUTHORIZED
+                - BUSINESS_LOGIC_ERROR
+                - INTERNAL_SERVER_ERROR
+              example: VALIDATION_FAILED
+            message:
+              type: string
+              description: 人類可讀錯誤描述（給開發者閱讀）
+              example: "Invalid fields"
+            details:
+              type: array
+              items:
+                type: object
+              description: 選用，提供欄位層級的驗證錯誤細節
+              example: []
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 50
+
+    # ── Stats ──────────────────────────────────────────────────────────────────
+    StatsPagination:
+      type: object
+      properties:
+        sort:
+          type: string
+          example: total_amount
+        direction:
+          type: string
+          example: desc
+        page:
+          type: integer
+          example: 1
+        total_count:
+          type: integer
+          example: 42
+        limit:
+          type: integer
+          example: 20
+        page_count:
+          type: integer
+          example: 3
+
+    # ── Auth ───────────────────────────────────────────────────────────────────
+    AccessTokenResponse:
+      type: object
+      required:
+        - success
+        - access_token
+        - token_type
+        - expires_in
+      properties:
+        success:
+          type: boolean
+          example: true
+        access_token:
+          type: string
+          description: RS256 簽署的 JWT Token
+          example: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          description: Token 有效秒數
+          example: 900
+
+    # ── Product ────────────────────────────────────────────────────────────────
+    ProductState:
+      type: string
+      enum:
+        - published
+        - publish_check
+        - cancelled
+      description: 商品狀態
+
+    ProductQuantityMode:
+      type: string
+      enum:
+        - stock
+        - warehouse
+        - unlimited
+      description: 庫存扣減模式
+
+    ProductInput:
+      type: object
+      description: 建立或更新商品時使用的欄位（camelCase）
+      properties:
+        type:
+          type: string
+          description: 商品類型
+          example: "physical"
+        state:
+          $ref: "#/components/schemas/ProductState"
+        quantityMode:
+          $ref: "#/components/schemas/ProductQuantityMode"
+        name:
+          type: string
+          description: 商品名稱
+          example: "經典白 T-shirt"
+        serialNumber:
+          type: string
+          description: 商品序號
+          example: "SKU-001"
+        cost:
+          type: number
+          description: 商品成本
+          example: 200
+        safetyStock:
+          type: number
+          description: 安全庫存量
+          example: 10
+        leadTime:
+          type: integer
+          minimum: 0
+          description: 預備出貨天數（非負整數）
+          example: 3
+        variant:
+          type: string
+          description: 商品規格說明
+          example: "顏色:白 / 尺寸:M"
+        description:
+          type: string
+          description: 商品描述（支援 HTML）
+        published:
+          oneOf:
+            - type: boolean
+            - type: string
+              format: date-time
+          description: 上架狀態或上架時間
+          example: true
+        cancelled:
+          oneOf:
+            - type: boolean
+            - type: string
+              format: date-time
+          description: 下架狀態或下架時間
+          example: false
+
+    ProductStock:
+      type: object
+      description: 商品庫存（規格 SKU）
+      properties:
+        id:
+          type: string
+        serial_number:
+          type: string
+          example: "SKU-001-WHITE-M"
+        variant:
+          type: string
+          example: "顏色:白 / 尺寸:M"
+        image:
+          type: string
+          nullable: true
+        original_price:
+          type: number
+          example: 500
+        selling_price:
+          type: number
+          example: 450
+        quantity:
+          type: integer
+          example: 10
+
+    Product:
+      type: object
+      description: 商品資源（snake_case，後端回傳格式）
+      properties:
+        id:
+          type: string
+          pattern: "^[a-f0-9]{16}$"
+          description: 商品 ID（16 位十六進位）
+          example: "1a2b3c4d5e6f7890"
+        number:
+          type: string
+          description: 商品序號
+          example: "SKU-001"
+        name:
+          type: string
+          example: "經典白 T-shirt"
+        state:
+          $ref: "#/components/schemas/ProductState"
+        cost:
+          type: number
+          example: 200
+        min_price:
+          type: number
+          nullable: true
+          description: 各規格中的最低售價
+          example: 450
+        max_price:
+          type: number
+          nullable: true
+          description: 各規格中的最高售價
+          example: 500
+        review_count:
+          type: integer
+          description: 評論數量
+          example: 0
+        avg_rating:
+          type: number
+          nullable: true
+          description: 平均評分
+          example: 4.5
+        safety_stock:
+          type: number
+          example: 10
+        lead_time:
+          type: integer
+          description: 預備出貨天數
+          example: 3
+        description:
+          type: string
+        variant:
+          type: string
+          example: "顏色:白 / 尺寸:M"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        published_at:
+          oneOf:
+            - type: boolean
+            - type: string
+              format: date-time
+          description: 上架狀態或上架時間
+        cancelled_at:
+          oneOf:
+            - type: boolean
+            - type: string
+              format: date-time
+          description: 下架狀態或下架時間
+        sort:
+          type: integer
+          example: 0
+        quantity_mode:
+          $ref: "#/components/schemas/ProductQuantityMode"
+        quantity_limit:
+          type: integer
+          nullable: true
+          description: 限購數量
+        fixed_price:
+          type: boolean
+          description: 是否為固定售價（不因規格而異）
+        search_disabled:
+          type: boolean
+          description: 是否從搜尋結果中隱藏
+        link:
+          type: string
+          nullable: true
+        url_path:
+          type: string
+          example: "classic-white-tshirt"
+        vendor_number:
+          type: string
+          nullable: true
+        marketing_label:
+          type: string
+          nullable: true
+        media:
+          type: integer
+          nullable: true
+        media_id:
+          type: string
+          nullable: true
+        limited_selections:
+          type: string
+          nullable: true
+        comment_required:
+          type: boolean
+          description: 是否必須填寫留言
+        comment:
+          type: string
+        keywords:
+          type: string
+        meta_description:
+          type: string
+        settings:
+          type: object
+          additionalProperties: true
+          description: 商品其他設定（結構依商品類型而異）
+        images:
+          type: array
+          items:
+            type: string
+        stocks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductStock"
+        score:
+          type: number
+          nullable: true
+
+    ProductDetail:
+      allOf:
+        - $ref: "#/components/schemas/Product"
+        - type: object
+          description: 詳細商品（含 additions、tags、product_items）
+          properties:
+            additions:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  number:
+                    type: string
+                  name:
+                    type: string
+                  state:
+                    $ref: "#/components/schemas/ProductState"
+                  variant:
+                    type: string
+                  quantity_mode:
+                    $ref: "#/components/schemas/ProductQuantityMode"
+                  quantity_limit:
+                    type: integer
+                    nullable: true
+                  vendor_number:
+                    type: string
+                    nullable: true
+                  marketing_label:
+                    type: string
+                    nullable: true
+                  comment_required:
+                    type: boolean
+                  comment:
+                    type: string
+                  settings:
+                    type: object
+                    additionalProperties: true
+                  images:
+                    type: array
+                    items:
+                      type: string
+                  stocks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ProductStock"
+            tags:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  code:
+                    type: string
+            product_items:
+              type: array
+              items:
+                type: object
+                description: 商品款式（SKU）
+                properties:
+                  id:
+                    type: string
+                  title:
+                    type: string
+                  content:
+                    type: string
+
+    # ── Order ──────────────────────────────────────────────────────────────────
+    OrderState:
+      type: string
+      enum:
+        - un_pay
+        - cod
+        - pay
+        - failure
+        - cancel
+      description: 訂單狀態
+
+    OrderLineItemState:
+      type: string
+      enum:
+        - build
+        - done
+        - cancel
+        - failure
+      description: 訂單品項狀態
+
+    OrderLineItem:
+      type: object
+      description: 訂單品項
+      properties:
+        id:
+          type: string
+        product_id:
+          type: string
+          example: "1a2b3c4d5e6f7890"
+        stock_id:
+          type: string
+        serial_number:
+          type: string
+          example: "SKU-001-WHITE-M"
+        name:
+          type: string
+          example: "經典白 T-shirt"
+        state:
+          $ref: "#/components/schemas/OrderLineItemState"
+        delivering_quantity:
+          type: integer
+          example: 0
+        delivered_quantity:
+          type: integer
+          example: 0
+        refunding_quantity:
+          type: integer
+          example: 0
+        refunded_quantity:
+          type: integer
+          example: 0
+        quantity:
+          type: integer
+          example: 2
+        original_price:
+          type: integer
+          example: 500
+        selling_price:
+          type: integer
+          example: 500
+        discount:
+          type: integer
+          example: 0
+        price:
+          type: integer
+          example: 500
+        cash:
+          type: integer
+          example: 0
+        amount:
+          type: integer
+          example: 1000
+        comment:
+          type: string
+          nullable: true
+        cancel:
+          type: string
+          nullable: true
+          description: 取消原因（品項被取消時填寫）
+        processed_at:
+          type: string
+          format: date-time
+          nullable: true
+        delivered_at:
+          type: string
+          format: date-time
+          nullable: true
+        cancelled_at:
+          type: string
+          format: date-time
+          nullable: true
+        image:
+          type: string
+          nullable: true
+          description: 品項圖片（僅在 require_image 情境下回傳）
+
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: "^[a-f0-9]{24}$"
+          description: 訂單 ID（24 位十六進位）
+          example: "5f4dcc3b5aa765d61d8327de"
+        number:
+          type: string
+          description: 訂單編號（人類可讀）
+          example: "ORD-20260823-0001"
+        state:
+          $ref: "#/components/schemas/OrderState"
+        currency:
+          type: string
+          description: 幣別代碼
+          example: "TWD"
+        amount:
+          type: integer
+          description: 訂單總金額
+          example: 1060
+        fee:
+          type: integer
+          description: 運費
+          example: 60
+        payment_fee:
+          type: integer
+          description: 金流手續費
+          example: 0
+        accounts:
+          type: integer
+          description: 已請款/入帳金額
+          example: 1060
+        comment:
+          type: string
+        buyer:
+          type: object
+          properties:
+            name:
+              type: string
+              example: "王小明"
+            mobile:
+              type: string
+              example: "0912345678"
+            email:
+              type: string
+              format: email
+              example: "buyer@example.com"
+            billing:
+              type: object
+              properties:
+                invoice_type:
+                  type: string
+                  nullable: true
+                invoice_title:
+                  type: string
+                  nullable: true
+                invoice_address:
+                  type: string
+                  nullable: true
+                carrier_type:
+                  type: string
+                  nullable: true
+                carrier_id:
+                  type: string
+                  nullable: true
+                tax_number:
+                  type: string
+                  nullable: true
+        receiver:
+          type: object
+          properties:
+            name:
+              type: string
+              example: "王小明"
+            mobile:
+              type: string
+              example: "0912345678"
+            location:
+              type: object
+              properties:
+                country:
+                  type: string
+                  example: "TW"
+                city:
+                  type: string
+                  example: "臺北市"
+                district:
+                  type: string
+                  example: "信義區"
+                zip:
+                  type: string
+                  example: "110"
+                address:
+                  type: string
+                  example: "信義路五段7號"
+                province:
+                  type: string
+                  nullable: true
+        transaction:
+          type: object
+          properties:
+            payment_gateway:
+              type: string
+              example: "PAYUNi"
+            payment_type:
+              type: string
+              example: "credit_card"
+            payment_fee:
+              type: integer
+              example: 0
+            payment_deadline:
+              type: string
+              format: date-time
+              nullable: true
+            payment_bank_code:
+              type: string
+              nullable: true
+            payment_code:
+              type: string
+              nullable: true
+            payment_info:
+              type: object
+              nullable: true
+              additionalProperties: true
+        shipping:
+          type: object
+          properties:
+            delivery_type:
+              type: string
+              example: "home_delivery"
+            delivery_name:
+              type: string
+              example: "黑貓宅配"
+            fare:
+              type: integer
+              example: 60
+            receive_date:
+              type: string
+              nullable: true
+            receive_time:
+              type: string
+              nullable: true
+            pickup_store:
+              type: object
+              nullable: true
+              description: 超商/門市取貨資訊，非取貨時為 null
+              properties:
+                id:
+                  type: string
+                type:
+                  type: string
+                name:
+                  type: string
+                address:
+                  type: string
+        line_items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderLineItem"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        paid_at:
+          type: string
+          format: date-time
+          nullable: true
+        delivered_at:
+          type: string
+          format: date-time
+          nullable: true
+        deliveries:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        refunds:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    OrderInput:
+      type: object
+      description: 建立或更新訂單時使用
+      properties:
+        member_id:
+          type: string
+          description: 會員 ID（可選，匿名購物時省略）
+        receiver_name:
+          type: string
+        receiver_mobile:
+          type: string
+        receiver_country:
+          type: string
+        receiver_city:
+          type: string
+        receiver_district:
+          type: string
+        receiver_zip:
+          type: string
+        receiver_address:
+          type: string
+        delivery_type:
+          type: string
+        delivery_name:
+          type: string
+        payment_gateway:
+          type: string
+        payment_type:
+          type: string
+        note:
+          type: string
+        order_items:
+          type: array
+          items:
+            type: object
+            required:
+              - stock_id
+              - quantity
+            properties:
+              stock_id:
+                type: string
+              quantity:
+                type: integer
+                minimum: 1
+
+    # ── Member ─────────────────────────────────────────────────────────────────
+    MemberType:
+      type: string
+      enum:
+        - guest
+        - member
+        - blacklist
+      description: 會員類型
+
+    MemberInvoiceInfo:
+      type: object
+      properties:
+        invoice_type:
+          type: string
+          nullable: true
+        invoice_carrier_type:
+          type: string
+          nullable: true
+        invoice_carrier_id:
+          type: string
+          nullable: true
+        tax_number:
+          type: string
+          nullable: true
+        invoice_title:
+          type: string
+          nullable: true
+        invoice_address:
+          type: string
+          nullable: true
+
+    Member:
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: "^[a-f0-9]{24}$"
+          description: 會員 ID（24 位十六進位）
+          example: "5f4dcc3b5aa765d61d8327de"
+        email:
+          type: string
+          format: email
+          example: "member@example.com"
+        type:
+          $ref: "#/components/schemas/MemberType"
+        newsletter:
+          type: boolean
+          description: 是否訂閱電子報
+        name:
+          type: string
+          example: "王小明"
+        mobile:
+          type: string
+          example: "0912345678"
+        gender:
+          type: string
+          nullable: true
+        birth_year:
+          type: string
+          example: "1990"
+        birth_month:
+          type: string
+          example: "1"
+        birth_day:
+          type: string
+          example: "15"
+        invoice_info:
+          $ref: "#/components/schemas/MemberInvoiceInfo"
+        custom_1:
+          type: string
+          nullable: true
+        custom_2:
+          type: string
+          nullable: true
+        custom_3:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    MemberInput:
+      type: object
+      description: 建立或更新會員時使用
+      properties:
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        mobile:
+          type: string
+        birth_date:
+          type: string
+          format: date
+        gender:
+          type: string
+          enum:
+            - male
+            - female
+            - other
+        country:
+          type: string
+        city:
+          type: string
+        district:
+          type: string
+        address:
+          type: string
+
+    CashRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        amount:
+          type: integer
+          description: 金額（正數為入帳，負數為扣款）
+          example: 100
+        balance:
+          type: integer
+          description: 操作後餘額
+          example: 500
+        reason:
+          type: string
+          nullable: true
+          example: "促銷活動贈送"
+        expired_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    PointRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        points:
+          type: integer
+          description: 積分異動量（正為獲得，負為使用）
+          example: 50
+        balance:
+          type: integer
+          description: 操作後積分餘額
+          example: 200
+        reason:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    Address:
+      type: object
+      properties:
+        receiver:
+          type: object
+          properties:
+            name:
+              type: string
+            mobile:
+              type: string
+            location:
+              type: object
+              properties:
+                country:
+                  type: string
+                city:
+                  type: string
+                district:
+                  type: string
+                zip:
+                  type: string
+                address:
+                  type: string
+                province:
+                  type: string
+                  nullable: true
+        shipping:
+          type: object
+          properties:
+            delivery_type:
+              type: string
+            delivery_name:
+              type: string
+            fare:
+              type: integer
+            receive_date:
+              type: string
+              format: date
+              nullable: true
+            receive_time:
+              type: string
+              nullable: true
+            pickup_store:
+              type: object
+              nullable: true
+              properties:
+                id:
+                  type: string
+                type:
+                  type: string
+                name:
+                  type: string
+                address:
+                  type: string
+
+    WishlistItem:
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: "^[a-f0-9]{24}$"
+          description: 願望清單 ID
+        product_id:
+          type: string
+          pattern: "^[a-f0-9]{16}$"
+        created_at:
+          type: string
+          format: date-time
+
+    # ── Delivery ───────────────────────────────────────────────────────────────
+    DeliveryInput:
+      type: object
+      properties:
+        delivery_type:
+          type: string
+          example: "home_delivery"
+        delivery_name:
+          type: string
+          example: "黑貓宅配"
+        tracking_number:
+          type: string
+          nullable: true
+        more_params:
+          type: object
+          description: 物流供應商額外參數（依供應商不同而異）
+
+    Delivery:
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: "^[a-f0-9]{24}$"
+        order_id:
+          type: string
+          pattern: "^[a-f0-9]{24}$"
+        delivery_type:
+          type: string
+        delivery_name:
+          type: string
+        tracking_number:
+          type: string
+          nullable: true
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    # ── Cart / Bag ─────────────────────────────────────────────────────────────
+    CartItem:
+      type: object
+      properties:
+        id:
+          type: string
+          description: 購物車項目 ID
+        stock_id:
+          type: string
+        product_id:
+          type: string
+          pattern: "^[a-f0-9]{16}$"
+        product_name:
+          type: string
+        quantity:
+          type: integer
+        unit_price:
+          type: integer
+        comment:
+          type: string
+          nullable: true
+
+  # ── Reusable Parameters ──────────────────────────────────────────────────────
+  parameters:
+    PageParam:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+      description: 頁碼
+
+    LimitParam:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 50
+      description: 每頁筆數
+
+    MemberIdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-f0-9]{24}$"
+      description: 會員 ID（24 位十六進位字串）
+
+    OrderIdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-f0-9]{24}$"
+      description: 訂單 ID（24 位十六進位字串）
+
+    ProductIdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-f0-9]{16}$"
+      description: 商品 ID（16 位十六進位字串）
+
+  # ── Reusable Responses ───────────────────────────────────────────────────────
+  responses:
+    Unauthorized:
+      description: 身份認證失敗
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            success: false
+            error:
+              code: UNAUTHORIZED
+              message: "Token is expired or missing"
+              details: []
+
+    BadRequest:
+      description: 請求參數錯誤或資源不存在
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            success: false
+            error:
+              code: VALIDATION_FAILED
+              message: "Invalid fields"
+              details: []
+
+    InternalError:
+      description: 伺服器內部錯誤
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            success: false
+            error:
+              code: INTERNAL_SERVER_ERROR
+              message: "An unexpected error occurred"
+              details: []
+
+# ─── Global Security ──────────────────────────────────────────────────────────
+security:
+  - BearerAuth: []
+
+# ─── Paths ────────────────────────────────────────────────────────────────────
+paths:
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # AUTH
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /api/v1/auth/access_token:
+    post:
+      tags:
+        - Auth
+      summary: 取得 Access Token
+      description: |
+        使用 `app_id` 與 `app_key` 換取 JWT Bearer Token。
+        Token 有效期為 **900 秒（15 分鐘）**，請在到期前呼叫本端點取得新 Token。
+
+        **此端點本身不需要 Bearer Token 認證**。
+      operationId: auth_access_token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - app_id
+                - app_key
+              properties:
+                app_id:
+                  type: string
+                  description: 應用程式 ID
+                  example: "{{appId}}"
+                app_key:
+                  type: string
+                  description: 應用程式 API Key（請勿記錄於 log）
+                  example: "{{appKey}}"
+            example:
+              app_id: "abc12345678def01"
+              app_key: "sk_live_xxxxxxxxxxxxxxxxxxxxxxxx"
+      responses:
+        "200":
+          description: 成功取得 Token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessTokenResponse"
+              example:
+                success: true
+                access_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+                token_type: Bearer
+                expires_in: 900
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # PRODUCTS
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /api/v1/products:
+    get:
+      tags:
+        - Products
+      summary: 取得商品列表
+      description: 依分頁取得商品列表。
+      operationId: list_products
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+        - name: created_at_min
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$'
+          description: 建立時間下限（YYYY-MM-DD HH:MM:SS）
+        - name: created_at_max
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$'
+          description: 建立時間上限（YYYY-MM-DD HH:MM:SS）
+        - name: updated_at_min
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$'
+          description: 修改時間下限（YYYY-MM-DD HH:MM:SS）
+        - name: updated_at_max
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$'
+          description: 修改時間上限（YYYY-MM-DD HH:MM:SS）
+        - name: published_at_min
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$'
+          description: 上架時間下限（YYYY-MM-DD HH:MM:SS）
+        - name: published_at_max
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$'
+          description: 上架時間上限（YYYY-MM-DD HH:MM:SS）
+        - name: ids
+          in: query
+          schema:
+            type: string
+            pattern: "^[0-9a-f,]+$"
+          description: 依商品 ID 篩選，多筆以逗號分隔（16 位十六進位）
+          example: "1a2b3c4d5e6f7890,1a2b3c4d5e6f7891"
+        - name: numbers
+          in: query
+          schema:
+            type: string
+          description: 依商品編號篩選，多筆以逗號分隔
+          example: "SKU-001,SKU-002"
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum:
+              - published
+              - publish_check
+              - cancelled
+          description: |
+            依商品狀態篩選，多筆以逗號分隔。
+            `published`（已上架）、`publish_check`（待上架）、`cancelled`（已下架）。
+          example: "published"
+        - name: category
+          in: query
+          schema:
+            type: string
+          description: 依商品分類篩選，可為 Tag ID（16 位十六進位）或 Tag Code
+        - name: query
+          in: query
+          schema:
+            type: string
+          description: 搜尋關鍵字
+        - name: search_mode
+          in: query
+          schema:
+            type: string
+            enum:
+              - literal
+              - advanced
+              - hybrid
+              - vector
+            default: advanced
+          description: 搜尋模式（僅在提供 query 參數時有效）
+        - name: search_disabled
+          in: query
+          schema:
+            type: string
+            enum:
+              - "0"
+              - "1"
+              - "false"
+              - "true"
+          description: 依是否停用搜尋篩選
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum:
+              - price_desc
+              - price_asc
+              - time_desc
+              - time_asc
+              - published
+              - hot
+              - sort_asc
+              - sort_desc
+              - rand
+              - rating_desc
+              - score
+          description: 排序方式
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  products:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Product"
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      tags:
+        - Products
+      summary: 新增商品
+      description: |
+        建立新商品。
+
+        必填欄位：`type`、`state`、`quantityMode`、`name`、`serialNumber`。
+        缺少任一者後端會回傳 `status: false`（HTTP 仍為 200）。
+      operationId: create_product
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - product
+              properties:
+                product:
+                  $ref: "#/components/schemas/ProductInput"
+            example:
+              product:
+                type: physical
+                state: active
+                quantityMode: limited
+                name: "經典白 T-shirt"
+                serialNumber: "SKU-001"
+                cost: 200
+                safetyStock: 10
+                leadTime: 2
+      responses:
+        "200":
+          description: 新增成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+                  product:
+                    $ref: "#/components/schemas/Product"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/products/{idOrLink}:
+    get:
+      tags:
+        - Products
+      summary: 取得單一商品詳細資訊
+      description: |
+        `idOrLink` 可為商品 ID（16 位十六進位）或商品的 `url_path`。
+        回應為 detail 模式，包含 `additions`、`tags`、`product_items`。
+      operationId: get_product
+      parameters:
+        - name: idOrLink
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 商品 ID（16 位十六進位）或 url_path
+          example: "1a2b3c4d5e6f7890"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  product:
+                    $ref: "#/components/schemas/ProductDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/products/{id}:
+    put:
+      tags:
+        - Products
+      summary: 更新商品
+      description: |
+        更新指定商品。只需傳入要更新的欄位，未傳入的欄位不會被修改。
+        `id` 必須為 16 位十六進位字串（`[a-f0-9]{16}`）。
+      operationId: update_product
+      parameters:
+        - $ref: "#/components/parameters/ProductIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - product
+              properties:
+                product:
+                  $ref: "#/components/schemas/ProductInput"
+            example:
+              product:
+                state: inactive
+                name: "經典白 T-shirt（改款）"
+      responses:
+        "200":
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+                  product:
+                    $ref: "#/components/schemas/Product"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      tags:
+        - Products
+      summary: 刪除商品
+      description: |
+        刪除指定商品。`id` 必須為 16 位十六進位字串。
+      operationId: delete_product
+      parameters:
+        - $ref: "#/components/parameters/ProductIdPath"
+      responses:
+        "200":
+          description: 刪除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # ORDERS
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /api/v1/orders:
+    get:
+      tags:
+        - Orders
+      summary: 取得訂單列表
+      description: 依分頁與篩選條件取得訂單列表。
+      operationId: list_orders
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+        - name: created_at_min
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$'
+          description: 建立時間下限（YYYY-MM-DD HH:MM:SS）
+        - name: created_at_max
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$'
+          description: 建立時間上限（YYYY-MM-DD HH:MM:SS）
+        - name: updated_at_min
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$'
+          description: 修改時間下限（YYYY-MM-DD HH:MM:SS）
+        - name: updated_at_max
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$'
+          description: 修改時間上限（YYYY-MM-DD HH:MM:SS）
+        - name: paid_at_min
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$'
+          description: 付款時間下限（YYYY-MM-DD HH:MM:SS）
+        - name: paid_at_max
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$'
+          description: 付款時間上限（YYYY-MM-DD HH:MM:SS）
+        - name: ids
+          in: query
+          schema:
+            type: string
+            pattern: "^[0-9a-f,]+$"
+          description: 依訂單 ID 篩選，多筆以逗號分隔（24 位十六進位）
+          example: "5f4dcc3b5aa765d61d8327de,5f4dcc3b5aa765d61d8327df"
+        - name: numbers
+          in: query
+          schema:
+            type: string
+          description: 依訂單編號篩選，多筆以逗號分隔
+          example: "ORD-20260823-0001,ORD-20260823-0002"
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum:
+              - un_pay
+              - cod
+              - pay
+              - failure
+              - cancel
+          description: |
+            依訂單狀態篩選，多筆以逗號分隔。
+            `un_pay`（未付款）、`cod`（貨到付款）、`pay`（已付款）、`failure`（付款失敗）、`cancel`（已取消）。
+          example: "pay,cod"
+        - name: buyer_name
+          in: query
+          schema:
+            type: string
+          description: 依購買人姓名篩選
+        - name: buyer_email
+          in: query
+          schema:
+            type: string
+            format: email
+          description: 依購買人電子郵箱篩選
+        - name: buyer_mobile
+          in: query
+          schema:
+            type: string
+          description: 依購買人手機篩選
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+                  orders:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Order"
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      tags:
+        - Orders
+      summary: 新增訂單
+      description: |
+        直接建立訂單（管理員 / 後台用途）。
+      operationId: create_order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - order
+              properties:
+                order:
+                  $ref: "#/components/schemas/OrderInput"
+      responses:
+        "200":
+          description: 建立成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+                  order:
+                    $ref: "#/components/schemas/Order"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/orders/{idOrNumber}:
+    get:
+      tags:
+        - Orders
+      summary: 取得單一訂單詳細資訊
+      description: |
+        `idOrNumber` 可為訂單 ID（24 位十六進位）或訂單編號（如 `ORD-20260823-0001`）。
+        回應包含商品圖片資訊。
+      operationId: get_order
+      parameters:
+        - name: idOrNumber
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 訂單 ID 或訂單編號
+          example: "5f4dcc3b5aa765d61d8327de"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+                  order:
+                    $ref: "#/components/schemas/Order"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/orders/{id}:
+    put:
+      tags:
+        - Orders
+      summary: 更新訂單
+      description: 更新訂單資訊（如收件人、物流、備註等）。
+      operationId: update_order
+      parameters:
+        - $ref: "#/components/parameters/OrderIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - order
+              properties:
+                order:
+                  $ref: "#/components/schemas/OrderInput"
+      responses:
+        "200":
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+                  order:
+                    $ref: "#/components/schemas/Order"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      tags:
+        - Orders
+      summary: 刪除訂單
+      description: 永久刪除訂單（不可恢復）。一般業務建議使用「取消」操作代替。
+      operationId: delete_order
+      parameters:
+        - $ref: "#/components/parameters/OrderIdPath"
+      responses:
+        "200":
+          description: 刪除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/orders/{id}/cancel:
+    post:
+      tags:
+        - Orders
+      summary: 取消訂單
+      description: 將訂單狀態設為已取消，可選填取消原因。
+      operationId: cancel_order
+      parameters:
+        - $ref: "#/components/parameters/OrderIdPath"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: 取消原因（選填）
+                  example: "客戶要求取消"
+      responses:
+        "200":
+          description: 取消成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: 訂單狀態不允許取消
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  #  /api/v1/orders/{id}/issue_invoice:
+  #    post:
+  #      tags:
+  #        - Orders
+  #      summary: 開立電子發票
+  #      description: |
+  #        針對指定訂單開立電子發票，需訂閱方案支援（Standard 以上或 Trial 方案）。
+  #        若發票已存在，則同步現有發票資訊。
+  #      operationId: issue_invoice
+  #      parameters:
+  #        - $ref: "#/components/parameters/OrderIdPath"
+  #      requestBody:
+  #        content:
+  #          application/json:
+  #            schema:
+  #              type: object
+  #              properties:
+  #                delay_day:
+  #                  type: integer
+  #                  minimum: 0
+  #                  default: 0
+  #                  description: 延遲開立天數
+  #      responses:
+  #        "200":
+  #          description: 開立成功
+  #          content:
+  #            application/json:
+  #              schema:
+  #                type: object
+  #                properties:
+  #                  status:
+  #                    type: boolean
+  #                    example: true
+  #                  invoice:
+  #                    type: object
+  #                    properties:
+  #                      invoice_number:
+  #                        type: string
+  #                        example: "AA-12345678"
+  #                      invoice_date:
+  #                        type: string
+  #                        format: date
+  #                        example: "2026-08-23"
+  #        "400":
+  #          $ref: "#/components/responses/BadRequest"
+  #        "401":
+  #          $ref: "#/components/responses/Unauthorized"
+  #        "500":
+  #          $ref: "#/components/responses/InternalError"
+  #
+  #  /api/v1/orders/{id}/create_delivery:
+  #    post:
+  #      tags:
+  #        - Orders
+  #      summary: 建立出貨單
+  #      description: 為指定訂單建立物流出貨記錄，支援多種物流供應商。
+  #      operationId: create_delivery
+  #      parameters:
+  #        - $ref: "#/components/parameters/OrderIdPath"
+  #      requestBody:
+  #        required: true
+  #        content:
+  #          application/json:
+  #            schema:
+  #              type: object
+  #              required:
+  #                - delivery
+  #              properties:
+  #                delivery:
+  #                  $ref: "#/components/schemas/DeliveryInput"
+  #                more_params:
+  #                  type: object
+  #                  description: 物流供應商額外參數
+  #      responses:
+  #        "200":
+  #          description: 建立成功
+  #          content:
+  #            application/json:
+  #              schema:
+  #                type: object
+  #                properties:
+  #                  status:
+  #                    type: boolean
+  #                    example: true
+  #                  delivery:
+  #                    $ref: "#/components/schemas/Delivery"
+  #        "400":
+  #          $ref: "#/components/responses/BadRequest"
+  #        "401":
+  #          $ref: "#/components/responses/Unauthorized"
+  #        "500":
+  #          $ref: "#/components/responses/InternalError"
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # MEMBERS
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /api/v1/members:
+    get:
+      tags:
+        - Members
+      summary: 取得會員列表
+      description: 依分頁與篩選條件取得會員列表。
+      operationId: list_members
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 50
+          description: 每頁筆數（最大 500）
+        - name: created_at_min
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$'
+          description: 建立時間下限（YYYY-MM-DD HH:MM:SS）
+        - name: created_at_max
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$'
+          description: 建立時間上限（YYYY-MM-DD HH:MM:SS）
+        - name: updated_at_min
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$'
+          description: 更新時間下限（YYYY-MM-DD HH:MM:SS）
+        - name: updated_at_max
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$'
+          description: 更新時間上限（YYYY-MM-DD HH:MM:SS）
+        - name: ids
+          in: query
+          schema:
+            type: string
+            pattern: "^[0-9a-f,]+$"
+          description: 依會員 ID 清單篩選，逗號分隔（如 `id1,id2`）
+        - name: birth_month
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 12
+          description: 依生日月份篩選（1–12）
+        - name: notifiable_wishlist_product_id
+          in: query
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{16}$"
+          description: 篩選已將此商品加入願望清單且尚未通知的會員（16 位商品 ID）
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+                  members:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Member"
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      tags:
+        - Members
+      summary: 新增會員
+      description: 建立新會員。
+      operationId: create_member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - member
+              properties:
+                member:
+                  $ref: "#/components/schemas/MemberInput"
+            example:
+              member:
+                email: "newuser@example.com"
+                name: "陳大文"
+                mobile: "0987654321"
+                country: "TW"
+      responses:
+        "200":
+          description: 建立成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  member:
+                    $ref: "#/components/schemas/Member"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/members/{idOrEmail}:
+    get:
+      tags:
+        - Members
+      summary: 取得單一會員
+      description: |
+        `idOrEmail` 可為：
+        - **會員 ID**：24 位十六進位字串（`[0-9a-f]{24}`）
+        - **Email**：會員的電子郵件地址
+      operationId: get_member
+      parameters:
+        - name: idOrEmail
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 會員 ID（24 位十六進位）或 Email
+          example: "member@example.com"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+                  member:
+                    $ref: "#/components/schemas/Member"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/members/{id}:
+    put:
+      tags:
+        - Members
+      summary: 更新會員資料
+      description: 更新指定會員資料，只需傳入要更新的欄位。
+      operationId: update_member
+      parameters:
+        - $ref: "#/components/parameters/MemberIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - member
+              properties:
+                member:
+                  $ref: "#/components/schemas/MemberInput"
+      responses:
+        "200":
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+                  member:
+                    $ref: "#/components/schemas/Member"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      tags:
+        - Members
+      summary: 刪除會員
+      description: 永久刪除指定會員帳號。
+      operationId: delete_member
+      parameters:
+        - $ref: "#/components/parameters/MemberIdPath"
+      responses:
+        "200":
+          description: 刪除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/members/{id}/cash:
+    get:
+      tags:
+        - Members
+      summary: 取得會員購物金紀錄
+      description: 查詢指定會員的購物金異動紀錄，回應包含 `total_cash` 當前累計餘額。
+      operationId: get_member_cash
+      parameters:
+        - $ref: "#/components/parameters/MemberIdPath"
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+                  cash:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CashRecord"
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+                  total_cash:
+                    type: integer
+                    description: 購物金當前餘額
+                    example: 500
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      tags:
+        - Members
+      summary: 新增購物金
+      description: |
+        為指定會員增加（或減少）購物金。
+        - `cash` 為必填欄位，正值為存入，負值為扣除。
+        - 可選填 `expired`（到期時間）與 `reason`（原因）。
+      operationId: add_member_cash
+      parameters:
+        - $ref: "#/components/parameters/MemberIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - cash
+              properties:
+                cash:
+                  type: integer
+                  description: 購物金異動量（正：存入；負：扣除）
+                  example: 100
+                expired:
+                  type: string
+                  format: date-time
+                  description: 到期時間（選填）
+                  example: "2027-12-31T23:59:59+08:00"
+                reason:
+                  type: string
+                  description: 操作原因（選填）
+                  example: "促銷活動贈送"
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/members/{id}/points:
+    get:
+      tags:
+        - Members
+      summary: 取得會員積分紀錄
+      description: 查詢指定會員的積分異動紀錄（分頁）。
+      operationId: get_member_points
+      parameters:
+        - $ref: "#/components/parameters/MemberIdPath"
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+                  points:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PointRecord"
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      tags:
+        - Members
+      summary: 新增積分
+      description: |
+        為指定會員增加積分。
+        - `points` 為必填欄位，僅支援正值（增加）。
+        - 可選填 `reason`（原因）。
+      operationId: add_member_points
+      parameters:
+        - $ref: "#/components/parameters/MemberIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - points
+              properties:
+                points:
+                  type: integer
+                  minimum: 1
+                  description: 增加的積分量
+                  example: 50
+                reason:
+                  type: string
+                  description: 操作原因（選填）
+                  example: "購物回饋積分"
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/members/{id}/addresses:
+    get:
+      tags:
+        - Members
+      summary: 取得會員歷史收件地址
+      description: |
+        依照會員的歷史訂單推導收件地址。所有篩選條件均為**精確比對**（非模糊搜尋），
+        空字串視為未帶入。若查無符合條件的訂單，回傳 `status: false`。
+      operationId: get_member_addresses
+      parameters:
+        - $ref: "#/components/parameters/MemberIdPath"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: 取最近 N 筆訂單（預設 1）
+        - name: receiver_country
+          in: query
+          schema:
+            type: string
+          description: 精確比對收件國家
+        - name: receiver_name
+          in: query
+          schema:
+            type: string
+          description: 精確比對收件人姓名
+        - name: delivery_type
+          in: query
+          schema:
+            type: string
+          description: 精確比對物流類型
+        - name: delivery_name
+          in: query
+          schema:
+            type: string
+          description: 精確比對物流名稱
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+                  addresses:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Address"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/members/{id}/wishlists:
+    get:
+      tags:
+        - Members
+      summary: 取得會員願望清單
+      description: 查詢指定會員的願望清單商品。
+      operationId: get_member_wishlists
+      parameters:
+        - $ref: "#/components/parameters/MemberIdPath"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+                  wishlists:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WishlistItem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      tags:
+        - Members
+      summary: 加入願望清單
+      description: 將商品加入指定會員的願望清單。
+      operationId: create_member_wishlist
+      parameters:
+        - $ref: "#/components/parameters/MemberIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - product_id
+              properties:
+                product_id:
+                  type: string
+                  pattern: "^[a-f0-9]{16}$"
+                  description: 商品 ID（16 位十六進位）
+                  example: "1a2b3c4d5e6f7890"
+      responses:
+        "200":
+          description: 加入成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/members/{id}/wishlists/{wishlistId}:
+    delete:
+      tags:
+        - Members
+      summary: 移除願望清單項目
+      description: 從指定會員的願望清單中移除商品。
+      operationId: delete_member_wishlist
+      parameters:
+        - $ref: "#/components/parameters/MemberIdPath"
+        - name: wishlistId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[a-f0-9]{24}$"
+          description: 願望清單項目 ID（24 位十六進位）
+      responses:
+        "200":
+          description: 移除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # STATS（報表）
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /api/v1/stats/revenue_report:
+    get:
+      tags:
+        - Stats
+      summary: 期間營業報表
+      description: |
+        依區間統計訂單營收與退款金額，可依 `period` 指定分組粒度（小時／星期／日／月／年）。
+        資料來源為 BigQuery，統計對象為 `state` 為 `pay` 或 `cod` 的訂單。
+      operationId: revenue_report
+      parameters:
+        - name: created_from
+          in: query
+          schema:
+            type: string
+            format: date
+          description: 訂單建立時間起（`YYYY-MM-DD`），預設為當月第一天
+          example: "2026-08-01"
+        - name: created_to
+          in: query
+          schema:
+            type: string
+            format: date
+          description: 訂單建立時間迄（`YYYY-MM-DD`），預設為今日
+          example: "2026-08-24"
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum:
+              - hour
+              - day_of_week
+              - day
+              - month
+              - year
+            default: day
+          description: 統計分組粒度
+        - name: referrer_code
+          in: query
+          schema:
+            type: string
+          description: 選填，依推薦代碼（`referrer` 或 `network_id`）篩選訂單
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      ordersStat:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            period:
+                              type: string
+                              example: "2026-08-24"
+                            quantity:
+                              type: integer
+                              example: 12
+                            price:
+                              type: number
+                              example: 850.5
+                            amount:
+                              type: number
+                              example: 10206
+                            fare:
+                              type: number
+                              example: 600
+                            payment_fee:
+                              type: number
+                              example: 60
+                      refundsStat:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            period:
+                              type: string
+                              example: "2026-08-24"
+                            refund_amount:
+                              type: number
+                              example: 500
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/stats/coupon_report:
+    get:
+      tags:
+        - Stats
+      summary: 活動代碼報表
+      description: |
+        依 `coupon_code` 分組，統計特定區間內使用該活動代碼訂單的訂單數、銷售額、平均客單價。
+        資料來源為 BigQuery，統計對象為 `state` 為 `pay` 或 `cod` 的訂單。
+      operationId: coupon_report
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+        - name: created_from
+          in: query
+          schema:
+            type: string
+            format: date
+          description: 訂單建立時間起（`YYYY-MM-DD`），預設為當月第一天
+        - name: created_to
+          in: query
+          schema:
+            type: string
+            format: date
+          description: 訂單建立時間迄（`YYYY-MM-DD`），預設為今日
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum:
+              - coupon_code
+              - order_count
+              - total_amount
+              - average_amount
+            default: total_amount
+          description: 排序欄位
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
+            default: desc
+          description: 排序方向
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      coupons:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            coupon_code:
+                              type: string
+                              example: "vip"
+                            order_count:
+                              type: integer
+                              example: 8
+                            total_amount:
+                              type: number
+                              example: 6800
+                            average_amount:
+                              type: number
+                              example: 850
+                      pagination:
+                        $ref: "#/components/schemas/StatsPagination"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/stats/member_ranking:
+    get:
+      tags:
+        - Stats
+      summary: 會員消費排名
+      description: |
+        依會員（`buyer_name` / `buyer_email`）分組，統計特定區間內的購買次數、總消費金額（不含運費）、
+        平均客單價、退貨次數、退貨金額。資料來源為 BigQuery。
+      operationId: member_ranking
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+        - name: created_from
+          in: query
+          schema:
+            type: string
+            format: date
+          description: 訂單建立時間起（`YYYY-MM-DD`），預設為當月第一天
+        - name: created_to
+          in: query
+          schema:
+            type: string
+            format: date
+          description: 訂單建立時間迄（`YYYY-MM-DD`），預設為今日
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum:
+              - buyer_name
+              - buyer_email
+              - order_count
+              - total_amount
+              - average_amount
+              - refund_count
+              - refund_amount
+            default: total_amount
+          description: 排序欄位
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
+            default: desc
+          description: 排序方向
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      members:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            buyer_name:
+                              type: string
+                              example: "林裕得"
+                            buyer_email:
+                              type: string
+                              example: "hydelin@gmail.com"
+                            order_count:
+                              type: integer
+                              example: 5
+                            total_amount:
+                              type: number
+                              example: 4250
+                            average_amount:
+                              type: number
+                              example: 850
+                            refund_count:
+                              type: integer
+                              example: 1
+                            refund_amount:
+                              type: number
+                              example: 500
+                      pagination:
+                        $ref: "#/components/schemas/StatsPagination"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/stats/product_ranking:
+    get:
+      tags:
+        - Stats
+      summary: 商品銷量排名
+      description: |
+        依商品分組，統計特定區間內的銷售數量與銷售金額。`type=name` 依商品名稱／序號分組（保留歷史名稱），
+        `type` 其他值則依 `product_id` 分組並可搭配 `tag_id` 篩選。資料來源為 BigQuery，
+        統計對象為 `state` 為 `pay` 或 `cod` 的訂單，且訂單項目狀態為 `build`、`purchase`、`process`、`delivery`。
+      operationId: product_ranking
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+        - name: created_from
+          in: query
+          schema:
+            type: string
+            format: date
+          description: 訂單建立時間起（`YYYY-MM-DD`），預設為當月第一天
+        - name: created_to
+          in: query
+          schema:
+            type: string
+            format: date
+          description: 訂單建立時間迄（`YYYY-MM-DD`），預設為今日
+        - name: type
+          in: query
+          schema:
+            type: string
+            default: name
+          description: 分組方式，`name` 依商品名稱／序號分組，其他值依 `product_id` 分組
+        - name: tag_id
+          in: query
+          schema:
+            type: string
+          description: 選填，依商品標籤 ID 篩選
+        - name: referrer_code
+          in: query
+          schema:
+            type: string
+          description: 選填，依推薦代碼（`referrer` 或 `network_id`）篩選訂單
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum:
+              - total_amount
+              - total_quantity
+              - product_id
+              - name
+              - serial_number
+            default: total_amount
+          description: 排序欄位
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
+            default: desc
+          description: 排序方向
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      products:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            product_id:
+                              type: string
+                              example: "5bd73df29831ebcf"
+                            name:
+                              type: string
+                              example: "鈕扣針織皺折半身裙 - 2色"
+                            serial_number:
+                              type: string
+                              example: "795321"
+                            total_quantity:
+                              type: integer
+                              example: 30
+                            total_amount:
+                              type: number
+                              example: 15000
+                      pagination:
+                        $ref: "#/components/schemas/StatsPagination"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # MCP (Model Context Protocol)
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /mcp:
+    post:
+      tags:
+        - MCP
+      summary: MCP JSON-RPC 請求（新建 Session）
+      description: |
+        ## Model Context Protocol (MCP) 端點
+
+        本端點實作 [MCP Streamable HTTP Transport](https://spec.modelcontextprotocol.io/specification/2025-03-26/basic/transports/#streamable-http)，
+        供 AI Agent（如 Claude、Cursor、MCP Inspector）整合使用。
+
+        ### 認證方式
+        與 `/api/v1/*` 不同，`/mcp` 使用**自訂 Header** 認證：
+        - `x-gogoshop-app-id`：租戶 App ID
+        - `x-gogoshop-app-key`：租戶 App Key
+
+        MCP Server 會自動透過 Tenant Auth Service 換取並快取 JWT Token（存於 Valkey），
+        **呼叫端無需手動管理 Token**。
+
+        ### Session 管理
+        - 首次請求不帶 `Mcp-Session-Id`，伺服器將建立 Session 並在回應 Header 中回傳 `Mcp-Session-Id`。
+        - 後續請求應在 `Mcp-Session-Id` Header 帶入 Session ID 以復用同一 Session。
+        - Session 僅存活於記憶體，Pod 重啟後需重新建立。
+
+        ### 支援的 MCP Tools
+
+        | Tool 名稱 | 說明 |
+        |-----------|------|
+        | `hello` | 回傳當前租戶資訊，用於連線測試 |
+        | `revenue_report` | 營收報表 |
+        | `coupon_report` | 折扣碼報表 |
+        | `member_ranking` | 會員消費排行 |
+        | `product_ranking` | 商品銷量排行 |
+        | `list_products` | 商品列表 |
+        | `get_product` | 商品詳細 |
+        | `create_product` | 新增商品 |
+        | `update_product` | 更新商品 |
+        | `delete_product` | 刪除商品 |
+        | `list_orders` | 訂單列表 |
+        | `get_order` | 訂單詳細 |
+        | `list_members` | 會員列表 |
+        | `get_member` | 會員詳細 |
+        | `get_member_cash` | 會員購物金紀錄 |
+        | `get_member_points` | 會員積分紀錄 |
+        | `get_member_addresses` | 會員歷史收件地址 |
+
+        ### JSON-RPC 2.0 格式範例
+
+        **初始化（initialize）**
+        ```json
+        {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "method": "initialize",
+          "params": {
+            "protocolVersion": "2025-03-26",
+            "capabilities": {},
+            "clientInfo": { "name": "my-agent", "version": "1.0.0" }
+          }
+        }
+        ```
+
+        **呼叫 Tool（tools/call）**
+        ```json
+        {
+          "jsonrpc": "2.0",
+          "id": 2,
+          "method": "tools/call",
+          "params": {
+            "name": "list_products",
+            "arguments": { "page": 1, "limit": 20 }
+          }
+        }
+        ```
+      operationId: mcp_post
+      security:
+        - AppIdHeader: []
+          AppKeyHeader: []
+      parameters:
+        - name: Mcp-Session-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: |
+            MCP Session ID（UUID v4）。
+            首次請求時省略，伺服器將自動建立並在回應 Header 中回傳。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON-RPC 2.0 請求
+              required:
+                - jsonrpc
+                - method
+              properties:
+                jsonrpc:
+                  type: string
+                  enum:
+                    - "2.0"
+                id:
+                  oneOf:
+                    - type: string
+                    - type: integer
+                  description: 請求 ID（通知訊息可省略）
+                method:
+                  type: string
+                  description: MCP 方法名稱
+                  example: "tools/call"
+                params:
+                  type: object
+                  description: 方法參數
+            examples:
+              initialize:
+                summary: 初始化連線
+                value:
+                  jsonrpc: "2.0"
+                  id: 1
+                  method: initialize
+                  params:
+                    protocolVersion: "2025-03-26"
+                    capabilities: {}
+                    clientInfo:
+                      name: "my-agent"
+                      version: "1.0.0"
+              tools_call:
+                summary: 呼叫 list_products
+                value:
+                  jsonrpc: "2.0"
+                  id: 2
+                  method: "tools/call"
+                  params:
+                    name: "list_products"
+                    arguments:
+                      page: 1
+                      limit: 20
+              tools_list:
+                summary: 列出可用 Tools
+                value:
+                  jsonrpc: "2.0"
+                  id: 3
+                  method: "tools/list"
+      responses:
+        "200":
+          description: JSON-RPC 成功回應（或 SSE 串流）
+          headers:
+            Mcp-Session-Id:
+              schema:
+                type: string
+                format: uuid
+              description: Session ID，後續請求應帶入此 Header
+          content:
+            application/json:
+              schema:
+                type: object
+                description: JSON-RPC 2.0 回應
+                required:
+                  - jsonrpc
+                properties:
+                  jsonrpc:
+                    type: string
+                    enum:
+                      - "2.0"
+                  id:
+                    oneOf:
+                      - type: string
+                      - type: integer
+                  result:
+                    type: object
+                    description: 成功時的回傳資料
+                  error:
+                    type: object
+                    description: 失敗時的錯誤資訊
+                    properties:
+                      code:
+                        type: integer
+                      message:
+                        type: string
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE 串流格式（用於長連線 / streaming tool 呼叫）
+        "401":
+          description: 缺少或無效的租戶認證 Header
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Unauthorized: missing x-gogoshop-app-id / x-gogoshop-app-key header"
+
+    get:
+      tags:
+        - MCP
+      summary: MCP SSE 訂閱（復用現有 Session）
+      description: |
+        使用 GET 方法對現有 Session 建立 SSE（Server-Sent Events）訂閱，
+        用於接收伺服器推送的非同步通知（如 heartbeat ping）。
+
+        **必須帶入 `Mcp-Session-Id` Header** 以指定要訂閱的 Session。
+      operationId: mcp_get
+      security:
+        - AppIdHeader: []
+          AppKeyHeader: []
+      parameters:
+        - name: Mcp-Session-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: 要訂閱的 MCP Session ID
+      responses:
+        "200":
+          description: SSE 串流連線成功
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Server-Sent Events 串流
+        "401":
+          description: 缺少或無效的租戶認證 Header
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+
+    delete:
+      tags:
+        - MCP
+      summary: 關閉 MCP Session
+      description: |
+        主動關閉並清理指定 Session，釋放伺服器端資源。
+
+        **必須帶入 `Mcp-Session-Id` Header**。
+      operationId: mcp_delete
+      security:
+        - AppIdHeader: []
+          AppKeyHeader: []
+      parameters:
+        - name: Mcp-Session-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: 要關閉的 MCP Session ID
+      responses:
+        "200":
+          description: Session 已關閉
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jsonrpc:
+                    type: string
+                    example: "2.0"
+        "401":
+          description: 缺少或無效的租戶認證 Header
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
