@@ -95,6 +95,7 @@ info:
     email: service@gogoshop.io
   license:
     name: Proprietary
+    identifier: Proprietary
 
 servers:
   - url: https://api.gogoshop.io
@@ -106,7 +107,7 @@ tags:
   - name: Orders
     description: 訂單管理 — CRUD、取消、開立發票、建立出貨單
   - name: Products
-    description: 商品管理 — CRUD
+    description: 商品管理 — CRUD、商品分類（Tag）管理、商品內文範本（Product Template）管理
   - name: Members
     description: 會員管理 — CRUD、購物金、積分、地址、願望清單
   - name: Stats
@@ -248,7 +249,10 @@ components:
       enum:
         - published
         - publish_check
+        - gift
         - cancelled
+        - discarded
+        - preparative
       description: 商品狀態
 
     ProductQuantityMode:
@@ -261,15 +265,17 @@ components:
 
     ProductInput:
       type: object
-      description: 建立或更新商品時使用的欄位（camelCase）
+      description: |
+        建立或更新商品時使用的欄位。除 `serialNumber`（相容舊版 camelCase，也可用 `serial_number`）外，
+        其餘欄位皆以 snake_case 傳入。更新時只需傳入要修改的欄位，未傳入的欄位不會被變更。
       properties:
         type:
           type: string
           description: 商品類型
-          example: "physical"
+          example: "default"
         state:
           $ref: "#/components/schemas/ProductState"
-        quantityMode:
+        quantity_mode:
           $ref: "#/components/schemas/ProductQuantityMode"
         name:
           type: string
@@ -277,25 +283,27 @@ components:
           example: "經典白 T-shirt"
         serialNumber:
           type: string
-          description: 商品序號
+          description: 商品序號（亦可使用 `serial_number`）
           example: "SKU-001"
         cost:
-          type: number
+          type: integer
           description: 商品成本
           example: 200
-        safetyStock:
-          type: number
+        safety_stock:
+          type: integer
           description: 安全庫存量
           example: 10
-        leadTime:
+        lead_time:
           type: integer
           minimum: 0
           description: 預備出貨天數（非負整數）
           example: 3
         variant:
-          type: string
-          description: 商品規格說明
-          example: "顏色:白 / 尺寸:M"
+          type: array
+          items:
+            type: string
+          description: 商品規格名稱（如顏色、尺寸）
+          example: ["顏色", "尺寸"]
         description:
           type: string
           description: 商品描述（支援 HTML）
@@ -313,6 +321,98 @@ components:
               format: date-time
           description: 下架狀態或下架時間
           example: false
+        vendor_number:
+          type: string
+          nullable: true
+          description: 廠商貨號
+        link:
+          type: string
+          nullable: true
+        images:
+          type: array
+          items:
+            type: string
+        marketing_label:
+          type: string
+          nullable: true
+        media:
+          type: integer
+          nullable: true
+        media_id:
+          type: string
+          nullable: true
+        limited_selections:
+          type: array
+          items:
+            type: string
+          description: 限用物流（未選擇則傳空陣列以清空）
+        comment_required:
+          type: boolean
+        comment:
+          type: string
+        keywords:
+          type: string
+        meta_description:
+          type: string
+        settings:
+          type: object
+          additionalProperties: true
+        quantity_limit:
+          type: integer
+          nullable: true
+        fixed_price:
+          type: boolean
+        search_disabled:
+          type: boolean
+        sort:
+          type: integer
+        weight:
+          type: number
+        warehouse_id:
+          type: string
+          nullable: true
+          description: 追蹤門市 ID（需 Warehouses 進階方案）
+        supplier_id:
+          type: string
+          nullable: true
+        stocks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductStock"
+        tag_ids:
+          type: array
+          items:
+            type: string
+          description: 商品分類 Tag ID 陣列
+        product_items:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                nullable: true
+              sort:
+                type: integer
+              title:
+                type: string
+              content:
+                type: string
+        additions:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                nullable: true
+              stock_id:
+                type: string
+              price:
+                type: number
+              quantity_limit:
+                type: integer
+                nullable: true
 
     ProductStock:
       type: object
@@ -338,6 +438,87 @@ components:
         quantity:
           type: integer
           example: 10
+
+    Tag:
+      type: object
+      description: 商品分類（Tag）資源
+      properties:
+        id:
+          type: string
+          pattern: "^[a-f0-9]{16}$"
+          description: 分類 ID（16 位十六進位）
+          example: "1a2b3c4d5e6f7890"
+        name:
+          type: string
+          description: 分類名稱
+          example: "上衣"
+        code:
+          type: string
+          description: 分類網址代碼（未指定時預設等於 name）
+          example: "shirts"
+
+    TagInput:
+      type: object
+      description: 建立/更新分類的輸入欄位。更新時只需傳入要修改的欄位。
+      properties:
+        name:
+          type: string
+          description: 分類名稱（建立時必填，最多 40 字）
+          example: "上衣"
+        code:
+          type: string
+          description: 分類網址代碼（同租戶內須唯一，最多 100 字，未提供則預設等於 name）
+          example: "shirts"
+
+    ProductTemplate:
+      type: object
+      description: 商品內文範本資源，可綁定商品分類（Tag），套用時合併進商品描述/更多內容頁籤
+      properties:
+        id:
+          type: string
+          pattern: "^[a-f0-9]{16}$"
+          description: 範本 ID（16 位十六進位）
+          example: "3c4d5e6f78901a2b"
+        tag_id:
+          type: string
+          nullable: true
+          pattern: "^[a-f0-9]{16}$"
+          description: 綁定的商品分類 ID，`null` 表示套用於所有商品
+          example: "1a2b3c4d5e6f7890"
+        sort:
+          type: integer
+          description: |
+            排序值，決定套用方式：
+            `101`/`102` 附加於商品描述前/後、`103`/`104` 附加於第一個內文頁籤前/後、其餘（<100）新增為獨立內文頁籤。
+          example: 101
+        title:
+          type: string
+          nullable: true
+          description: 範本標題
+        content:
+          type: string
+          nullable: true
+          description: 範本內容（HTML）
+
+    ProductTemplateInput:
+      type: object
+      description: 建立/更新商品內文範本的輸入欄位。更新時只需傳入要修改的欄位。
+      properties:
+        tag_id:
+          type: string
+          nullable: true
+          pattern: "^[a-f0-9]{16}$"
+          description: 綁定的商品分類 ID，不指定或傳 `null` 表示套用於所有商品
+        sort:
+          type: integer
+          description: 排序值
+          example: 101
+        title:
+          type: string
+          description: 範本標題
+        content:
+          type: string
+          description: 範本內容（HTML）
 
     Product:
       type: object
@@ -389,8 +570,10 @@ components:
         description:
           type: string
         variant:
-          type: string
-          example: "顏色:白 / 尺寸:M"
+          type: array
+          items:
+            type: string
+          example: ["顏色", "尺寸"]
         created_at:
           type: string
           format: date-time
@@ -443,8 +626,11 @@ components:
           type: string
           nullable: true
         limited_selections:
-          type: string
+          type: array
+          items:
+            type: string
           nullable: true
+          description: 限用物流
         comment_required:
           type: boolean
           description: 是否必須填寫留言
@@ -462,6 +648,24 @@ components:
           type: array
           items:
             type: string
+        type:
+          type: string
+          enum:
+            - default
+            - chilled
+            - frozen
+          description: 商品溫層
+        weight:
+          type: number
+          description: 商品重量
+          example: 0.5
+        warehouse_id:
+          type: string
+          nullable: true
+          description: 追蹤門市 ID（需 Warehouses 進階方案）
+        supplier_id:
+          type: string
+          nullable: true
         stocks:
           type: array
           items:
@@ -517,6 +721,21 @@ components:
                     type: array
                     items:
                       $ref: "#/components/schemas/ProductStock"
+            raw_additions:
+              type: array
+              description: 加購品原始資料（供後台編輯用，含贈品/限購設定）
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  stock_id:
+                    type: string
+                  price:
+                    type: number
+                  quantity_limit:
+                    type: integer
+                    nullable: true
             tags:
               type: array
               items:
@@ -536,6 +755,8 @@ components:
                 properties:
                   id:
                     type: string
+                  sort:
+                    type: integer
                   title:
                     type: string
                   content:
@@ -673,6 +894,20 @@ components:
           example: 1060
         comment:
           type: string
+        invoice_number:
+          type: string
+          nullable: true
+          description: 發票號碼
+          example: "AA-12345678"
+        invoice_date:
+          type: string
+          format: date
+          nullable: true
+          description: 發票日期
+        referrer_code:
+          type: string
+          nullable: true
+          description: 分銷代碼
         buyer:
           type: object
           properties:
@@ -781,6 +1016,10 @@ components:
             receive_time:
               type: string
               nullable: true
+            retail_name:
+              type: string
+              description: 取貨門市名稱，非超商取貨時為空字串
+              example: "7-ELEVEN 信義門市"
             pickup_store:
               type: object
               nullable: true
@@ -825,7 +1064,9 @@ components:
 
     OrderInput:
       type: object
-      description: 建立或更新訂單時使用
+      description: |
+        建立或更新訂單時使用。新增訂單時，扣庫存、建立訂單、現金付款標記與資料庫交易皆整合在同一個
+        原子交易內完成。
       properties:
         member_id:
           type: string
@@ -945,6 +1186,31 @@ components:
         custom_3:
           type: string
           nullable: true
+        last_ip:
+          type: string
+          description: 最後登入 IP
+        last_time:
+          type: string
+          format: date-time
+          nullable: true
+          description: 最後登入時間
+        membership:
+          type: object
+          nullable: true
+          description: 所屬會員等級，非會員等級（guest/blacklist/一般 member）則為 null
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+        cash_balance:
+          type: number
+          nullable: true
+          description: 購物金餘額
+        points_total:
+          type: number
+          nullable: true
+          description: 積分總額
         created_at:
           type: string
           format: date-time
@@ -954,32 +1220,50 @@ components:
 
     MemberInput:
       type: object
-      description: 建立或更新會員時使用
+      description: 建立或更新會員時使用。新增會員時 `email`、`password` 為必填，且 `name`、`mobile` 須同時提供或同時省略。
       properties:
         email:
           type: string
           format: email
+        password:
+          type: string
+          description: 密碼，僅新增會員時必填
         name:
           type: string
         mobile:
           type: string
-        birth_date:
-          type: string
-          format: date
         gender:
           type: string
-          enum:
-            - male
-            - female
-            - other
-        country:
+          nullable: true
+        birth_year:
           type: string
-        city:
+          example: "1990"
+        birth_month:
           type: string
-        district:
+          example: "1"
+        birth_day:
           type: string
-        address:
+          example: "15"
+        newsletter:
+          type: boolean
+          description: 是否訂閱電子報
+        custom_1:
           type: string
+          nullable: true
+        custom_2:
+          type: string
+          nullable: true
+        custom_3:
+          type: string
+          nullable: true
+        comment:
+          type: string
+          nullable: true
+        membership_id:
+          type: string
+          description: 會員等級。可為 guest／member／blacklist，或實際的 membership id（升等成該等級的會員）
+        invoice_info:
+          $ref: "#/components/schemas/MemberInvoiceInfo"
 
     CashRecord:
       type: object
@@ -1203,6 +1487,24 @@ components:
         pattern: "^[a-f0-9]{16}$"
       description: 商品 ID（16 位十六進位字串）
 
+    TagIdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-f0-9]{16}$"
+      description: 分類 ID（16 位十六進位字串）
+
+    ProductTemplateIdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-f0-9]{16}$"
+      description: 商品內文範本 ID（16 位十六進位字串）
+
   # ── Reusable Responses ───────────────────────────────────────────────────────
   responses:
     Unauthorized:
@@ -1374,13 +1676,9 @@ paths:
           in: query
           schema:
             type: string
-            enum:
-              - published
-              - publish_check
-              - cancelled
           description: |
-            依商品狀態篩選，多筆以逗號分隔。
-            `published`（已上架）、`publish_check`（待上架）、`cancelled`（已下架）。
+            依商品狀態篩選，多筆以逗號分隔，值請參考 `ProductState`
+            （`published`/`publish_check`/`gift`/`cancelled`/`discarded`/`preparative`）。
           example: "published"
         - name: category
           in: query
@@ -1392,6 +1690,41 @@ paths:
           schema:
             type: string
           description: 搜尋關鍵字
+        - name: name
+          in: query
+          schema:
+            type: string
+          description: 依商品名稱模糊搜尋（LIKE）
+        - name: serial_number
+          in: query
+          schema:
+            type: string
+          description: 依商品貨號搜尋，可用空白分隔多個貨號做完全比對（單個則為模糊搜尋）
+        - name: vendor_number
+          in: query
+          schema:
+            type: string
+          description: 依廠商貨號搜尋，可用空白分隔多個做完全比對（單個則為模糊搜尋）
+        - name: marketing_label
+          in: query
+          schema:
+            type: string
+          description: 依行銷標籤模糊搜尋（LIKE）
+        - name: comment
+          in: query
+          schema:
+            type: string
+          description: 依後台備註模糊搜尋（LIKE）
+        - name: stock_serial_number
+          in: query
+          schema:
+            type: string
+          description: 依規格貨號（stocks.serial_number）模糊搜尋
+        - name: tag_name
+          in: query
+          schema:
+            type: string
+          description: 依分類名稱（tags.name）完全比對篩選
         - name: search_mode
           in: query
           schema:
@@ -1430,6 +1763,27 @@ paths:
               - rating_desc
               - score
           description: 排序方式
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum:
+              - id
+              - created
+              - modified
+              - sort
+              - max_price
+              - min_price
+          description: 依欄位排序（與 `direction` 搭配使用，優先於 `order`）
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
+            default: desc
+          description: 排序方向（需搭配 `sort` 參數使用）
       responses:
         "200":
           description: 成功
@@ -1441,12 +1795,15 @@ paths:
                   success:
                     type: boolean
                     example: true
-                  products:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/Product"
-                  pagination:
-                    $ref: "#/components/schemas/Pagination"
+                  data:
+                    type: object
+                    properties:
+                      products:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/ProductDetail"
+                      pagination:
+                        $ref: "#/components/schemas/Pagination"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "500":
@@ -1459,8 +1816,8 @@ paths:
       description: |
         建立新商品。
 
-        必填欄位：`type`、`state`、`quantityMode`、`name`、`serialNumber`。
-        缺少任一者後端會回傳 `status: false`（HTTP 仍為 200）。
+        必填欄位：`type`、`state`、`quantity_mode`、`name`、`serialNumber`（或 `serial_number`）。
+        缺少任一者、或建立過程發生例外時，回傳 `success: false`（HTTP 仍為 200），並附上 `errorMessage`。
       operationId: create_product
       requestBody:
         required: true
@@ -1475,27 +1832,38 @@ paths:
                   $ref: "#/components/schemas/ProductInput"
             example:
               product:
-                type: physical
-                state: active
-                quantityMode: limited
+                type: default
+                state: published
+                quantity_mode: unlimited
                 name: "經典白 T-shirt"
                 serialNumber: "SKU-001"
                 cost: 200
-                safetyStock: 10
-                leadTime: 2
+                safety_stock: 10
+                lead_time: 2
       responses:
         "200":
-          description: 新增成功
+          description: 新增成功或失敗（本 API 一律回傳 HTTP 200，請以 `success` 判斷結果）
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  status:
-                    type: boolean
-                    example: true
-                  product:
-                    $ref: "#/components/schemas/Product"
+                oneOf:
+                  - type: object
+                    properties:
+                      success:
+                        type: boolean
+                        example: true
+                      data:
+                        type: object
+                        properties:
+                          product:
+                            $ref: "#/components/schemas/Product"
+                  - type: object
+                    properties:
+                      status:
+                        type: boolean
+                        example: false
+                      errorMessage:
+                        type: string
         "401":
           $ref: "#/components/responses/Unauthorized"
         "500":
@@ -1526,8 +1894,14 @@ paths:
               schema:
                 type: object
                 properties:
-                  product:
-                    $ref: "#/components/schemas/ProductDetail"
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      product:
+                        $ref: "#/components/schemas/ProductDetail"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1559,21 +1933,32 @@ paths:
                   $ref: "#/components/schemas/ProductInput"
             example:
               product:
-                state: inactive
+                state: cancelled
                 name: "經典白 T-shirt（改款）"
       responses:
         "200":
-          description: 更新成功
+          description: 更新成功或失敗（本 API 一律回傳 HTTP 200，請以 `success` 判斷結果）
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  status:
-                    type: boolean
-                    example: true
-                  product:
-                    $ref: "#/components/schemas/Product"
+                oneOf:
+                  - type: object
+                    properties:
+                      success:
+                        type: boolean
+                        example: true
+                      data:
+                        type: object
+                        properties:
+                          product:
+                            $ref: "#/components/schemas/Product"
+                  - type: object
+                    properties:
+                      status:
+                        type: boolean
+                        example: false
+                      errorMessage:
+                        type: string
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1592,15 +1977,466 @@ paths:
         - $ref: "#/components/parameters/ProductIdPath"
       responses:
         "200":
-          description: 刪除成功
+          description: 刪除成功或失敗（本 API 一律回傳 HTTP 200，請以 `success` 判斷結果）
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      success:
+                        type: boolean
+                        example: true
+                  - type: object
+                    properties:
+                      status:
+                        type: boolean
+                        example: false
+                      errorMessage:
+                        type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # PRODUCTS - TAGS（商品分類，歸類於 Products 資料夾）
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /api/v1/tags:
+    get:
+      tags:
+        - Products
+      summary: 取得分類列表
+      description: 取得商品分類（Tag）列表，不分頁。
+      operationId: list_tags
+      parameters:
+        - name: name
+          in: query
+          schema:
+            type: string
+          description: 依分類名稱模糊搜尋（LIKE）
+        - name: code
+          in: query
+          schema:
+            type: string
+          description: 依分類網址代碼完全比對篩選
+      responses:
+        "200":
+          description: 成功取得分類列表
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  status:
+                  success:
                     type: boolean
                     example: true
+                  data:
+                    type: object
+                    properties:
+                      tags:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Tag"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      tags:
+        - Products
+      summary: 新增分類
+      description: 新增商品分類（Tag）。`name` 為必填，`code` 未提供時預設等於 `name`，同租戶內 `code` 須唯一。
+      operationId: create_tag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - tag
+              properties:
+                tag:
+                  $ref: "#/components/schemas/TagInput"
+            example:
+              tag:
+                name: "上衣"
+      responses:
+        "200":
+          description: 新增成功或失敗（本 API 一律回傳 HTTP 200，請以 `success` 判斷結果）
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      success:
+                        type: boolean
+                        example: true
+                      data:
+                        type: object
+                        properties:
+                          tag:
+                            $ref: "#/components/schemas/Tag"
+                  - type: object
+                    properties:
+                      status:
+                        type: boolean
+                        example: false
+                      errorMessage:
+                        type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/tags/{id}:
+    get:
+      tags:
+        - Products
+      summary: 取得單一分類
+      description: 依 ID 取得單一商品分類。
+      operationId: get_tag
+      parameters:
+        - $ref: "#/components/parameters/TagIdPath"
+      responses:
+        "200":
+          description: 成功取得分類
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      tag:
+                        $ref: "#/components/schemas/Tag"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    put:
+      tags:
+        - Products
+      summary: 更新分類
+      description: |
+        更新指定分類。只需傳入要更新的欄位，未傳入的欄位不會被修改。
+        `id` 必須為 16 位十六進位字串（`[a-f0-9]{16}`）。
+      operationId: update_tag
+      parameters:
+        - $ref: "#/components/parameters/TagIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - tag
+              properties:
+                tag:
+                  $ref: "#/components/schemas/TagInput"
+            example:
+              tag:
+                name: "上衣（改名）"
+      responses:
+        "200":
+          description: 更新成功或失敗（本 API 一律回傳 HTTP 200，請以 `success` 判斷結果）
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      success:
+                        type: boolean
+                        example: true
+                      data:
+                        type: object
+                        properties:
+                          tag:
+                            $ref: "#/components/schemas/Tag"
+                  - type: object
+                    properties:
+                      status:
+                        type: boolean
+                        example: false
+                      errorMessage:
+                        type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      tags:
+        - Products
+      summary: 刪除分類
+      description: 刪除指定分類。`id` 必須為 16 位十六進位字串。
+      operationId: delete_tag
+      parameters:
+        - $ref: "#/components/parameters/TagIdPath"
+      responses:
+        "200":
+          description: 刪除成功或失敗（本 API 一律回傳 HTTP 200，請以 `success` 判斷結果）
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      success:
+                        type: boolean
+                        example: true
+                  - type: object
+                    properties:
+                      status:
+                        type: boolean
+                        example: false
+                      errorMessage:
+                        type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # PRODUCTS - PRODUCT TEMPLATES（商品內文範本，歸類於 Products 資料夾）
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /api/v1/product_templates:
+    get:
+      tags:
+        - Products
+      summary: 取得商品內文範本列表
+      description: |
+        取得商品內文範本（Product Template）列表，不分頁。
+        範本可依 `tag_id` 綁定特定商品分類，未綁定分類的範本（`tag_id` 為 `null`）套用於所有商品。
+      operationId: list_product_templates
+      parameters:
+        - name: tag_ids
+          in: query
+          schema:
+            type: string
+            pattern: "^[a-f0-9,]*$"
+          description: |
+            依商品分類 ID 篩選，多筆以逗號分隔。
+            回傳結果為「未綁定分類（`tag_id` 為 `null`）」與「綁定於指定分類」的範本聯集；
+            若未提供此參數，僅回傳未綁定分類的範本。
+          example: "1a2b3c4d5e6f7890,2b3c4d5e6f789012"
+      responses:
+        "200":
+          description: 成功取得商品內文範本列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      product_templates:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/ProductTemplate"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      tags:
+        - Products
+      summary: 新增商品內文範本
+      description: 新增商品內文範本（Product Template）。
+      operationId: create_product_template
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - product_template
+              properties:
+                product_template:
+                  $ref: "#/components/schemas/ProductTemplateInput"
+            example:
+              product_template:
+                tag_id: null
+                sort: 101
+                title: "共用說明標題"
+                content: "共用說明內容"
+      responses:
+        "200":
+          description: 新增成功或失敗（本 API 一律回傳 HTTP 200，請以 `success` 判斷結果）
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      success:
+                        type: boolean
+                        example: true
+                      data:
+                        type: object
+                        properties:
+                          product_template:
+                            $ref: "#/components/schemas/ProductTemplate"
+                  - type: object
+                    properties:
+                      status:
+                        type: boolean
+                        example: false
+                      errorMessage:
+                        type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/product_templates/{id}:
+    get:
+      tags:
+        - Products
+      summary: 取得單一商品內文範本
+      description: 依 ID 取得單一商品內文範本。
+      operationId: get_product_template
+      parameters:
+        - $ref: "#/components/parameters/ProductTemplateIdPath"
+      responses:
+        "200":
+          description: 成功取得商品內文範本
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      product_template:
+                        $ref: "#/components/schemas/ProductTemplate"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    put:
+      tags:
+        - Products
+      summary: 更新商品內文範本
+      description: |
+        更新指定商品內文範本。只需傳入要更新的欄位，未傳入的欄位不會被修改。
+        `id` 必須為 16 位十六進位字串（`[a-f0-9]{16}`）。
+      operationId: update_product_template
+      parameters:
+        - $ref: "#/components/parameters/ProductTemplateIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - product_template
+              properties:
+                product_template:
+                  $ref: "#/components/schemas/ProductTemplateInput"
+            example:
+              product_template:
+                title: "共用說明標題（修改）"
+      responses:
+        "200":
+          description: 更新成功或失敗（本 API 一律回傳 HTTP 200，請以 `success` 判斷結果）
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      success:
+                        type: boolean
+                        example: true
+                      data:
+                        type: object
+                        properties:
+                          product_template:
+                            $ref: "#/components/schemas/ProductTemplate"
+                  - type: object
+                    properties:
+                      status:
+                        type: boolean
+                        example: false
+                      errorMessage:
+                        type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      tags:
+        - Products
+      summary: 刪除商品內文範本
+      description: 刪除指定商品內文範本。`id` 必須為 16 位十六進位字串。
+      operationId: delete_product_template
+      parameters:
+        - $ref: "#/components/parameters/ProductTemplateIdPath"
+      responses:
+        "200":
+          description: 刪除成功或失敗（本 API 一律回傳 HTTP 200，請以 `success` 判斷結果）
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties:
+                      success:
+                        type: boolean
+                        example: true
+                  - type: object
+                    properties:
+                      status:
+                        type: boolean
+                        example: false
+                      errorMessage:
+                        type: string
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1701,6 +2537,69 @@ paths:
           schema:
             type: string
           description: 依購買人手機篩選
+        - name: keyword
+          in: query
+          schema:
+            type: string
+          description: 搜尋關鍵字，需搭配 `search` 指定搜尋欄位
+        - name: search
+          in: query
+          schema:
+            type: string
+            enum:
+              - serial_number
+              - product.serial_number
+              - product.name
+              - coupon_code
+              - referrer_code
+              - buyer_email
+              - name
+              - mobile
+              - comment
+              - delivery_name
+          description: |
+            搭配 `keyword` 使用，指定搜尋的欄位/範圍。
+            `serial_number`（訂單編號）、`product.serial_number`（商品貨號）、`product.name`（商品名稱）、
+            `coupon_code`（活動代碼）、`referrer_code`（分銷代碼）、`buyer_email`（購買人 email）、
+            `name`（購買人或收件人姓名）、`mobile`（購買人或收件人手機）、`comment`（備註）、`delivery_name`（配送方式/門市名稱）。
+          example: "product.name"
+        - name: receive_date_min
+          in: query
+          schema:
+            type: string
+            format: date
+          description: 到貨日期下限（YYYY-MM-DD）
+        - name: receive_date_max
+          in: query
+          schema:
+            type: string
+            format: date
+          description: 到貨日期上限（YYYY-MM-DD）
+        - name: invoice_date_min
+          in: query
+          schema:
+            type: string
+            format: date
+          description: 發票日期下限（YYYY-MM-DD）
+        - name: invoice_date_max
+          in: query
+          schema:
+            type: string
+            format: date
+          description: 發票日期上限（YYYY-MM-DD）
+        - name: model
+          in: query
+          schema:
+            type: string
+            enum:
+              - PayableOrders
+              - DeliverableOrders
+              - InvoiceableOrders
+          description: |
+            依訂單清單類型套用預設篩選條件。
+            `PayableOrders`（待付款：未付款/貨到付款訂單）、
+            `DeliverableOrders`（待出貨：已付款/貨到付款且尚未出貨、且商品已備貨或已採購的訂單）、
+            `InvoiceableOrders`（待開發票：台幣、已付款/貨到付款、且發票類型為二聯或三聯的訂單）。
       responses:
         "200":
           description: 成功
@@ -1855,6 +2754,60 @@ paths:
                   status:
                     type: boolean
                     example: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/orders/pay:
+    post:
+      tags:
+        - Orders
+      summary: 批次標記付款成功
+      description: 一次呼叫，將多筆訂單依 id 標記為付款成功，取代逐筆呼叫。
+      operationId: pay_orders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - order_ids
+              properties:
+                order_ids:
+                  type: array
+                  items:
+                    type: string
+                  description: 訂單 id 清單
+                  example: ["651f1c2e9a1b2c3d4e5f6789", "651f1c2e9a1b2c3d4e5f678a"]
+                paid:
+                  type: string
+                  description: 付款時間，未提供則使用當下時間
+                  example: "2026-08-23 12:00:00"
+      responses:
+        "200":
+          description: 處理完成（個別訂單失敗不影響整體回應，詳見 failed）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: boolean
+                    example: true
+                  failed:
+                    type: array
+                    description: 標記失敗的訂單清單
+                    items:
+                      type: object
+                      properties:
+                        order_id:
+                          type: string
+                        errorMessage:
+                          type: string
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -2062,6 +3015,43 @@ paths:
             type: string
             pattern: "^[0-9a-f]{16}$"
           description: 篩選已將此商品加入願望清單且尚未通知的會員（16 位商品 ID）
+        - name: last_time_min
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$'
+          description: 最後登入時間下限（YYYY-MM-DD HH:MM:SS）
+        - name: last_time_max
+          in: query
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$'
+          description: 最後登入時間上限（YYYY-MM-DD HH:MM:SS）
+        - name: type
+          in: query
+          schema:
+            type: string
+          description: 依會員類型篩選：`guest`／`member`／`blacklist`／`newsletter`／`cash`，或指定會員等級 ID
+        - name: email
+          in: query
+          schema:
+            type: string
+          description: 依 Email 模糊搜尋
+        - name: name
+          in: query
+          schema:
+            type: string
+          description: 依姓名模糊搜尋
+        - name: mobile
+          in: query
+          schema:
+            type: string
+          description: 依手機號碼模糊搜尋
+        - name: last_ip
+          in: query
+          schema:
+            type: string
+          description: 依最後登入 IP 篩選
       responses:
         "200":
           description: 成功
