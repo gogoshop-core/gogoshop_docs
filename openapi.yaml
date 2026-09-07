@@ -5346,8 +5346,11 @@ paths:
         | `list_members` | 會員列表 |
         | `get_member` | 單一會員 |
         | `get_member_addresses` | 會員歷史收件地址 |
-        # | `get_member_cash` | 會員購物金紀錄（暫未開放） |
-        # | `get_member_points` | 會員積分紀錄（暫未開放） |
+        | `list_messages` | 訊息列表 |
+        | `get_message` | 單一訊息 |
+        | `add_or_update_message` | 新增或更新訊息 |
+        | `set_message_active` | 設定訊息啟用狀態 |
+        | `delete_message` | 刪除訊息 |
 
         ### JSON-RPC 2.0 格式範例
 

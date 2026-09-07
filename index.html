@@ -20,7 +20,7 @@
         <div id="redoc-container"></div>
         <script>    
           function initializeRedoc() {
-            const schemaFile = './openapi.yaml';
+            const schemaFile = './openapi.yaml?t=' + Date.now();
             const options = {
               untrustedSpec: true
             };
