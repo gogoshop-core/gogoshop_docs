@@ -5326,22 +5326,27 @@ paths:
         | Tool 名稱 | 說明 |
         |-----------|------|
         | `hello` | 回傳當前租戶資訊，用於連線測試 |
-        | `revenue_report` | 營收報表 |
-        | `coupon_report` | 折扣碼報表 |
-        | `member_ranking` | 會員消費排行 |
-        | `product_ranking` | 商品銷量排行 |
+        | `get_revenue_report` | 期間營業報表 |
+        | `get_coupon_report` | 活動代碼報表 |
+        | `get_member_ranking` | 會員消費報表 |
+        | `get_product_ranking` | 商品銷售報表 |
         | `list_products` | 商品列表 |
         | `get_product` | 商品詳細 |
         | `create_product` | 新增商品 |
         | `update_product` | 更新商品 |
         | `delete_product` | 刪除商品 |
+        | `list_tags` | 分類列表 |
+        | `get_tag` | 分類詳細 |
+        | `create_tag` | 新增分類 |
+        | `update_tag` | 更新分類 |
+        | `delete_tag` | 刪除分類 |
         | `list_orders` | 訂單列表 |
         | `get_order` | 訂單詳細 |
         | `list_members` | 會員列表 |
-        | `get_member` | 會員詳細 |
-        | `get_member_cash` | 會員購物金紀錄 |
-        | `get_member_points` | 會員積分紀錄 |
+        | `get_member` | 單一會員 |
         | `get_member_addresses` | 會員歷史收件地址 |
+        # | `get_member_cash` | 會員購物金紀錄（暫未開放） |
+        # | `get_member_points` | 會員積分紀錄（暫未開放） |
 
         ### JSON-RPC 2.0 格式範例
 
