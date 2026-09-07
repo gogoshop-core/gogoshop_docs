@@ -65,8 +65,9 @@ info:
     | 狀態碼 | 說明 | 處理建議 |
     |--------|------|----------|
     | `200` | OK | 請求成功 |
-    | `400` | Bad Request | 請求參數錯誤，請檢查 Body 或 Params |
+    | `400` | Bad Request | 客戶端錯誤、請求參數驗證失敗或業務邏輯不符，請檢查 Body 或 Params |
     | `401` | Unauthorized | 身份驗證失敗或 Token 已過期 |
+    | `404` | Not Found | 單一筆資料查詢（依 ID 或代碼）找不到該資源 |
     | `409` | Conflict | 程式符合規範但業務邏輯不允許 |
     | `429` | Too Many Requests | 觸發速率限制，請稍候再試 |
     | `500` | Internal Server Error | 伺服器內部錯誤，請聯繫技術支援 |
